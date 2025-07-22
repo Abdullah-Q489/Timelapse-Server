@@ -6,6 +6,8 @@ __pycache__/
 venv/
 .env/
 .venv/
+**/venv/
+
 
 # VS Code or other editor folders (optional)
 .vscode/
