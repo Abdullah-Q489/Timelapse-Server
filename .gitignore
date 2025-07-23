@@ -1,5 +1,6 @@
 # Byte-compiled / cache files
 __pycache__/
+**/__pycache__/
 *.py[cod]
 
 # Virtual environment
@@ -8,7 +9,10 @@ venv/
 .venv/
 **/venv/
 
-
 # VS Code or other editor folders (optional)
 .vscode/
 .idea/
+
+# Ignore all Images folders anywhere
+Images/
+**/Images/
