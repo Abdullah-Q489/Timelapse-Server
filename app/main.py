@@ -55,3 +55,12 @@ def latest_image():
     relative_path = latest.relative_to(UPLOAD_DIR)
     url = f"/static/{relative_path.as_posix()}"
     return {"url": url}
+
+@app.get("/all-images")
+def all_images():
+    """
+    Return all image file paths as static URLs, sorted newest first.
+    """
+    images = sorted(UPLOAD_DIR.rglob("*.jpg"), reverse=True)
+    urls = [f"/static/{img.relative_to(UPLOAD_DIR).as_posix()}" for img in images]
+    return {"images": urls}
