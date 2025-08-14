@@ -1,43 +1,82 @@
+// page.tsx
 'use client'
-
 import { useEffect, useRef, useState } from 'react'
 
 const AHP = process.env.NEXT_PUBLIC_AHP_SERVER ?? 'http://localhost:8001'
+const WS_URL = `${AHP.replace(/^http/, 'ws')}/ws/updates`
+
+// --- singleton guards (module scope) ---
+let wsSingleton: WebSocket | null = null
+let reconnectTimerSingleton: ReturnType<typeof setTimeout> | null = null
+let fallbackTimerSingleton: ReturnType<typeof setInterval> | null = null
+let startedSingleton = false
 
 export default function Home() {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [imageTimestamp, setImageTimestamp] = useState<string | null>(null)
   const lastUrlRef = useRef<string>('')
 
+  const applyImage = (relUrl: string) => {
+    const fullUrl = `${AHP}${relUrl}`
+    lastUrlRef.current = fullUrl
+    setImageUrl(`${fullUrl}?t=${Date.now()}`)
+
+    const match = relUrl.match(/(\d{2})-(\d{2})-(\d{4})_(\d{2})-(\d{2})-(\d{2})\.jpg/)
+    if (match) {
+      const [_, dd, mm, yyyy, hh, min, ss] = match
+      setImageTimestamp(`${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`)
+    } else {
+      setImageTimestamp(null)
+    }
+  }
+
+  const fetchLatestImage = () => {
+    fetch(`${AHP}/latest-image`, { cache: 'no-store' })
+      .then(res => res.json())
+      .then(data => {
+        const rel = data?.url as string | undefined
+        if (!rel) return
+        const fullUrl = `${AHP}${rel}`
+        if (fullUrl !== lastUrlRef.current) applyImage(rel)
+      })
+      .catch(err => console.error('Failed to fetch image:', err))
+  }
+
   useEffect(() => {
-    const fetchLatestImage = () => {
-      fetch(`${AHP}/latest-image`, { cache: 'no-store' })
-        .then(res => res.json())
-        .then(data => {
-          const rel = data?.url as string | undefined
-          if (!rel) return
+    if (startedSingleton) return
+    startedSingleton = true
 
-          const fullUrl = `${AHP}${rel}`
-          if (fullUrl !== lastUrlRef.current) {
-            lastUrlRef.current = fullUrl
-            // cache-bust so the browser doesn’t show a stale image
-            setImageUrl(`${fullUrl}?t=${Date.now()}`)
+    // 1) Initial fill
+    fetchLatestImage()
 
-            const match = rel.match(/(\d{2})-(\d{2})-(\d{4})_(\d{2})-(\d{2})-(\d{2})\.jpg/)
-            if (match) {
-              const [_, dd, mm, yyyy, hh, min, ss] = match
-              setImageTimestamp(`${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`)
-            } else {
-              setImageTimestamp(null)
-            }
-          }
-        })
-        .catch(err => console.error('Failed to fetch image:', err))
+    // 2) WebSocket
+    const connect = () => {
+      wsSingleton = new WebSocket(WS_URL)
+
+      wsSingleton.onopen = () => console.log('[WS] connected')
+      wsSingleton.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data)
+          if (msg?.type === 'new_image' && msg?.url) applyImage(msg.url)
+        } catch { /* ignore */ }
+      }
+      wsSingleton.onclose = () => {
+        if (reconnectTimerSingleton) clearTimeout(reconnectTimerSingleton)
+        reconnectTimerSingleton = setTimeout(connect, 5000)
+      }
+      wsSingleton.onerror = () => { try { wsSingleton?.close() } catch {} }
+    }
+    connect()
+
+    // 3) Slow fallback polling (every 2 min)
+    if (!fallbackTimerSingleton) {
+      fallbackTimerSingleton = setInterval(fetchLatestImage, 120_000)
     }
 
-    fetchLatestImage()
-    const interval = setInterval(fetchLatestImage, 10_000)
-    return () => clearInterval(interval)
+    // Cleanup on full page unload only (we keep singleton between remounts)
+    return () => {
+      // do NOT reset startedSingleton here; StrictMode would double-start again
+    }
   }, [])
 
   return (
